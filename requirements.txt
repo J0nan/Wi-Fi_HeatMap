@@ -1,7 +1,6 @@
-PyQt5
 matplotlib
 numpy
-pywifi
-Pillow
 scipy
+Pillow
+pywifi
 comtypes
