@@ -6,6 +6,8 @@ import platform
 import re
 import time
 import json
+import base64
+import io
 import numpy as np
 import scipy.interpolate
 import matplotlib
@@ -207,6 +209,8 @@ class WifiHeatmapApp:
                 self.original_image = np.array(img)
                 self.img_height, self.img_width = self.original_image.shape[:2]
                 
+                logger.info(f"Map image loaded: {file_path} ({self.img_width}x{self.img_height})")
+                
                 self.redraw_map()
                 
                 self.btn_calibrate['state'] = tk.NORMAL
@@ -292,6 +296,7 @@ class WifiHeatmapApp:
                     px_distance = np.sqrt((self.calibration_points[0][0] - self.calibration_points[1][0])**2 + 
                                           (self.calibration_points[0][1] - self.calibration_points[1][1])**2)
                     self.pixels_per_meter = px_distance / distance
+                    logger.info(f"Calibration complete: {self.pixels_per_meter:.2f} px/m (pixel distance: {px_distance:.1f}, real distance: {distance}m)")
                     self.lbl_calibration.config(text=f"Calibrated: {self.pixels_per_meter:.2f} px/m", fg='#008800')
                     self.btn_measure['state'] = tk.NORMAL
                     self.btn_generate['state'] = tk.NORMAL
@@ -519,13 +524,22 @@ class WifiHeatmapApp:
         file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON Files", "*.json")])
         if file_path:
             try:
+                # Encode the image as base64 for portability
+                image_b64 = None
+                if self.original_image is not None:
+                    img = Image.fromarray(self.original_image)
+                    buf = io.BytesIO()
+                    img.save(buf, format='PNG')
+                    image_b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+                
                 data = {
-                    'image_path': self.image_path,
+                    'image_base64': image_b64,
                     'pixels_per_meter': self.pixels_per_meter,
                     'measurements': self.measurements
                 }
                 with open(file_path, 'w') as f:
                     json.dump(data, f)
+                logger.info(f"Session saved to {file_path} ({len(self.measurements)} measurements)")
                 messagebox.showinfo("Success", "Session saved successfully.")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save session: {e}")
@@ -534,17 +548,29 @@ class WifiHeatmapApp:
         file_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
         if file_path:
             try:
+                logger.info(f"Loading session from {file_path}")
                 with open(file_path, 'r') as f:
                     data = json.load(f)
-                    
-                img_path = data.get('image_path')
-                if img_path and os.path.exists(img_path):
-                    self.image_path = img_path
-                    img = Image.open(img_path).convert('RGB')
+                
+                # Try base64 image first, fall back to image_path for old session files
+                image_b64 = data.get('image_base64')
+                if image_b64:
+                    img_bytes = base64.b64decode(image_b64)
+                    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
                     self.original_image = np.array(img)
                     self.img_height, self.img_width = self.original_image.shape[:2]
+                    self.image_path = None
+                    logger.info(f"Map image loaded from embedded base64 ({self.img_width}x{self.img_height})")
                 else:
-                    messagebox.showwarning("Warning", "Saved map image not found. Please load a map manually.")
+                    img_path = data.get('image_path')
+                    if img_path and os.path.exists(img_path):
+                        self.image_path = img_path
+                        img = Image.open(img_path).convert('RGB')
+                        self.original_image = np.array(img)
+                        self.img_height, self.img_width = self.original_image.shape[:2]
+                        logger.info(f"Map image loaded from path: {img_path} ({self.img_width}x{self.img_height})")
+                    else:
+                        messagebox.showwarning("Warning", "Saved map image not found. Please load a map manually.")
                     
                 self.pixels_per_meter = data.get('pixels_per_meter')
                 self.measurements = data.get('measurements', [])
@@ -564,6 +590,7 @@ class WifiHeatmapApp:
                     
                 self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
                 self.update_ssid_dropdown()
+                logger.info(f"Session loaded successfully ({len(self.measurements)} measurements, calibration: {self.pixels_per_meter})")
                 messagebox.showinfo("Success", "Session loaded successfully.")
                 
             except Exception as e:
