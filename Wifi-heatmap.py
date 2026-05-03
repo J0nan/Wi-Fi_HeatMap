@@ -45,13 +45,19 @@ def channel_to_freq(channel):
     """Convert Wi-Fi channel to theoretical center frequency in MHz."""
     try:
         ch = int(channel)
-        if ch == 14: return 2484.0
-        if 1 <= ch <= 13: return 2407.0 + (ch * 5)
-        if 36 <= ch <= 165: return 5000.0 + (ch * 5)
-        if 1 <= ch <= 233: return 5950.0 + (ch * 5) # 6 GHz bands
-        return 2400.0 # Fallback 
-    except:
-        return 2400.0
+
+        if ch == 14:
+            return 2484.0
+        elif 1 <= ch <= 13:
+            return 2407.0 + (ch * 5)
+        elif 36 <= ch <= 165:
+            return 5000.0 + (ch * 5)
+        elif 1 <= ch <= 233:
+            return 5950.0 + (ch * 5)
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
 
 class WifiHeatmapApp:
     def __init__(self, root):
@@ -121,13 +127,7 @@ class WifiHeatmapApp:
         self.btn_calibrate = ttk.Button(self.sidebar, text="Calibrate Map", command=self.start_calibration, state=tk.DISABLED)
         self.btn_calibrate.pack(fill=tk.X, pady=(0, 5))
         self.lbl_calibration = tk.Label(self.sidebar, text="Not calibrated", bg='#f4f4f4', fg='#cc0000', font=('Helvetica', 9))
-        self.lbl_calibration.pack(anchor='w', pady=(0, 10))
-        
-        self.radius_var = tk.DoubleVar(value=5.0)  # default radius in meters
-        self.radius_var.trace_add('write', self.on_radius_change)
-        tk.Label(self.sidebar, text="Measurement Radius (m):", bg='#f4f4f4', font=title_font).pack(anchor='w')
-        self.radius_entry = ttk.Entry(self.sidebar, textvariable=self.radius_var)
-        self.radius_entry.pack(fill=tk.X, pady=(0, 20))
+        self.lbl_calibration.pack(anchor='w', pady=(0, 20))
         
         # Measure
         tk.Label(self.sidebar, text="4. Measure:", bg='#f4f4f4', font=title_font).pack(anchor='w', pady=(0, 5))
@@ -160,15 +160,6 @@ class WifiHeatmapApp:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.main_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.canvas.mpl_connect('button_press_event', self.on_map_click)
-
-    def on_radius_change(self, *args):
-        try:
-            r = self.radius_var.get()
-        except tk.TclError:
-            return
-        if self.pixels_per_meter and r is not None and r > 0:
-            px = r * self.pixels_per_meter
-            logger.info(f"Measurement radius changed to {r:.1f} m ({px:.1f} pixels at current calibration)")
 
     def load_interfaces(self):
         logger.info("Detecting available Wi-Fi interfaces...")
@@ -285,7 +276,7 @@ class WifiHeatmapApp:
             
             if self.measurements:
                 x = [m['x'] for m in self.measurements]
-                y = [m['y'] for m in self.measurements]
+                y =[m['y'] for m in self.measurements]
                 self.ax.plot(x, y, 'ro', markersize=6, markeredgecolor='black')
                 
         self.fig.tight_layout()
@@ -383,7 +374,7 @@ class WifiHeatmapApp:
                 all_ssids.update(s.keys())
                 
             for ssid in all_ssids:
-                entries = [s[ssid] for s in scans if ssid in s]
+                entries =[s[ssid] for s in scans if ssid in s]
                 avg_signal = int(sum(e['signal'] for e in entries) / len(entries))
                 
                 # Assume the frequency doesn't change meaningfully across the 3 rapid scans
@@ -564,9 +555,9 @@ class WifiHeatmapApp:
             logger.info("Notifying user about caveats of hidden SSID processing.")
             messagebox.showinfo("Hidden Networks", "You are generating a heatmap for [Hidden SSID] networks.\n\nPlease note that multiple distinct hidden networks might be grouped together under this label.")
             
-        px = [m['x'] for m in self.measurements if ssid in m['ssids']]
-        py = [m['y'] for m in self.measurements if ssid in m['ssids']]
-        pz = [m['ssids'][ssid]['signal'] for m in self.measurements if ssid in m['ssids']]
+        px =[m['x'] for m in self.measurements if ssid in m['ssids']]
+        py =[m['y'] for m in self.measurements if ssid in m['ssids']]
+        pz =[m['ssids'][ssid]['signal'] for m in self.measurements if ssid in m['ssids']]
         pf = [m['ssids'][ssid]['freq'] for m in self.measurements if ssid in m['ssids']]
         
         if len(px) < 1:
@@ -585,14 +576,6 @@ class WifiHeatmapApp:
             # Setup Grid
             grid_x, grid_y = np.mgrid[0:self.img_width:200j, 0:self.img_height:200j]
             logger.info(f"Mathematical interpolation grid constructed over {self.img_width}x{self.img_height} area.")
-            
-            # Convert user radius (meters) to pixels using calibration
-            try:
-                radius_m = self.radius_var.get()
-            except tk.TclError:
-                radius_m = 5.0
-            radius_px = radius_m * self.pixels_per_meter if self.pixels_per_meter else 0
-            logger.info(f"Using measurement propagation radius of {radius_m}m ({radius_px:.1f} pixels).")
 
             # Initialize arrays for physical linear power (mW) tracking
             Z_num = np.zeros(grid_x.shape, dtype=float)
@@ -601,7 +584,6 @@ class WifiHeatmapApp:
 
             logger.info("Applying theoretical frequency propagation models based on Free-Space Path Loss formulas...")
 
-            # Iterate over points applying specific physical propagation formulas matching the measured frequencies
             for xi, yi, zi_percent, freq_mhz in zip(px, py, pz, pf):
                 # Back-convert unified % back to physical dBm
                 zi_dbm = (zi_percent * 60.0 / 100.0) - 100.0
@@ -611,31 +593,32 @@ class WifiHeatmapApp:
                 dist_px = np.sqrt(dx*dx + dy*dy)
                 
                 dist_m = dist_px / self.pixels_per_meter if self.pixels_per_meter else dist_px
-
-                mask = (dist_px <= radius_px) if radius_px > 0 else np.ones_like(dist_px, dtype=bool)
-                if not np.any(mask):
-                    continue
                 
-                # Assume signals decay theoretically relative to known measured points over distance
-                # Use 1 meter as reference boundary distance for mathematical stability 
-                # Calculation specific to the unique frequency (MHz) of the AP providing this reading
-                loss_1m = 20 * np.log10(0.001) + 20 * np.log10(freq_mhz) + 32.44
+                # 1. Transmission Power anchor to align with calibration point
+                tx_power_dbm = 0.0
                 
-                dist_km = np.clip(dist_m, 1.0, None) / 1000.0
-                loss_d = 20 * np.log10(dist_km) + 20 * np.log10(freq_mhz) + 32.44
+                # 2. Reverse FSPL formula to find Virtual AP Distance
+                path_loss_db = tx_power_dbm - zi_dbm
+                d_ap_km = 10.0 ** ((path_loss_db - 20 * np.log10(freq_mhz) - 32.44) / 20.0)
                 
-                # Difference relative to the 1m reference boundary point
-                loss_diff = loss_d - loss_1m
+                # 3. New Distance Simulation
+                d_total_km = d_ap_km + (dist_m / 1000.0)
                 
-                # Signal drop mapped dynamically
-                predicted_dbm = np.where(mask, zi_dbm - loss_diff, -100.0)
+                # 4. Forward FSPL calculation at the extended distance
+                loss_fspl = 20 * np.log10(d_total_km) + 20 * np.log10(freq_mhz) + 32.44
                 
-                # Convert prediction back to physical linear power for interpolation
+                # 5. Indoor Environment Absorption (forces realistic decay to < 40% & 0%)
+                indoor_penalty = 1.2 * dist_m
+                
+                # Dynamic signal prediction across the whole grid
+                predicted_dbm = tx_power_dbm - loss_fspl - indoor_penalty
+                
+                # Convert prediction back to physical linear power for IDW interpolation blending
                 predicted_mw = 10.0 ** (predicted_dbm / 10.0)
                 
-                # The energy density drops with the square of the distance (1 / d^2)
+                # The energy density IDW blends everything with the square of the visual distance
                 with np.errstate(divide='ignore'):
-                    w = np.where(mask, 1.0 / (dist_m**2 + eps), 0.0)
+                    w = 1.0 / (dist_m**2 + eps)
 
                 # Accumulate linear weighted values
                 Z_num += w * predicted_mw
@@ -652,7 +635,13 @@ class WifiHeatmapApp:
 
             grid_z = (grid_z_dbm + 100.0) * 100.0 / 60.0
             grid_z = np.clip(grid_z, 0.0, 100.0)
+            
+            # Mask out uncalculated spots safely
             grid_z[W_sum == 0] = np.nan  
+            
+            # Mask out any value below 30% to render it completely transparent
+            logger.info("Masking out areas below 30% signal strength to render them fully transparent.")
+            grid_z[grid_z < 35.0] = np.nan
                  
             self.redraw_map()
             
@@ -678,18 +667,18 @@ class WifiHeatmapApp:
         
         ax.imshow(self.original_image)
 
-        # Applying exactly the color ranges required:
-        # > 75% -> solid Green
-        # 75% - 50% -> gradient Turquoise to Blue
-        # < 40% -> Yellow to Red
+        # Matplotlib Color Map Definition:
+        # Values scale from [0.0 to 1.0] representing 0% to 100%.
+        # - > 75% Good signal
+        # - < 75% and > 50% Acceptable signal
+        # - < 50% and > 40% Weak signal
+        # - < 40% Unreliable signal ()
+        
         colors_list =[
             (0.00, 'red'),
-            # (0.00, 'red'),
-            (0.40, 'yellow'),
-            # (0.50, 'blue'),
-            (0.75, 'turquoise'),
-            # (0.751, 'green'),
-            (1.00, 'darkgreen')
+            (0.40, 'red'),
+            (0.60, 'blue'),
+            (1.00, 'green')
         ]
         wifi_cmap = LinearSegmentedColormap.from_list('wifi_cmap', colors_list)
 
@@ -739,16 +728,10 @@ class WifiHeatmapApp:
                     img.save(buf, format='PNG')
                     image_b64 = base64.b64encode(buf.getvalue()).decode('ascii')
                 
-                try:
-                    current_radius = self.radius_var.get()
-                except tk.TclError:
-                    current_radius = 5.0
-                    
                 data = {
                     'image_base64': image_b64,
                     'pixels_per_meter': self.pixels_per_meter,
-                    'measurements': self.measurements,
-                    'radius': current_radius
+                    'measurements': self.measurements
                 }
                 
                 logger.info("Writing JSON payload to disk...")
@@ -786,11 +769,6 @@ class WifiHeatmapApp:
                     
                 self.pixels_per_meter = data.get('pixels_per_meter')
                 self.measurements = data.get('measurements',[])
-                
-                loaded_radius = data.get('radius')
-                if loaded_radius is not None:
-                    self.radius_var.set(loaded_radius)
-                    logger.info(f"Restored measurement scan radius to {loaded_radius:.1f} meters.")
                 
                 if self.original_image is not None:
                     logger.info("Redrawing GUI map view with loaded image payload.")
