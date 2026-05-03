@@ -30,18 +30,32 @@ logging.basicConfig(level=getattr(logging, args.log_level), format='%(asctime)s 
 logger = logging.getLogger('WiFiHeatmap')
 
 # Silence external libraries unless explicitly requested
-logging.getLogger('matplotlib').setLevel(logging.WARNING)
-logging.getLogger('PIL').setLevel(logging.WARNING)
 if args.log_level != 'DEBUG':
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
     logging.getLogger('pywifi').setLevel(logging.WARNING)
 
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.colors import LinearSegmentedColormap
 import os
+
+def channel_to_freq(channel):
+    """Convert Wi-Fi channel to theoretical center frequency in MHz."""
+    try:
+        ch = int(channel)
+        if ch == 14: return 2484.0
+        if 1 <= ch <= 13: return 2407.0 + (ch * 5)
+        if 36 <= ch <= 165: return 5000.0 + (ch * 5)
+        if 1 <= ch <= 233: return 5950.0 + (ch * 5) # 6 GHz bands
+        return 2400.0 # Fallback 
+    except:
+        return 2400.0
 
 class WifiHeatmapApp:
     def __init__(self, root):
+        logger.info("Initializing Wi-Fi Heatmap Application...")
         self.root = root
         self.root.title("Wi-Fi Heatmap Generator")
         self.root.geometry("1000x700")
@@ -51,16 +65,17 @@ class WifiHeatmapApp:
         style.theme_use('clam')
 
         self.os_name = platform.system()
+        logger.info(f"Detected Operating System: {self.os_name}")
         
         self.image_path = None
         self.original_image = None
         self.img_width = 0
         self.img_height = 0
         
-        self.calibration_points = []
+        self.calibration_points =[]
         self.pixels_per_meter = None
         
-        self.measurements = []
+        self.measurements =[]
         
         self.state = 'IDLE' 
         
@@ -69,16 +84,20 @@ class WifiHeatmapApp:
         self.interfaces_map = {}
         
         self.setup_ui()
+        logger.info("UI successfully setup.")
         self.load_interfaces()
         
         # Handle window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
     def on_closing(self):
+        logger.info("User requested to close the application. Prompting confirmation...")
         if messagebox.askyesno("Quit", "Are you sure you want to exit? Any unsaved progress will be lost."):
+            logger.info("Exit confirmed. Shutting down application.")
             self.root.destroy()
             self.root.quit()
-        
+        else:
+            logger.info("Exit cancelled by user.")
 
     def setup_ui(self):
         # Sidebar
@@ -102,7 +121,13 @@ class WifiHeatmapApp:
         self.btn_calibrate = ttk.Button(self.sidebar, text="Calibrate Map", command=self.start_calibration, state=tk.DISABLED)
         self.btn_calibrate.pack(fill=tk.X, pady=(0, 5))
         self.lbl_calibration = tk.Label(self.sidebar, text="Not calibrated", bg='#f4f4f4', fg='#cc0000', font=('Helvetica', 9))
-        self.lbl_calibration.pack(anchor='w', pady=(0, 20))
+        self.lbl_calibration.pack(anchor='w', pady=(0, 10))
+        
+        self.radius_var = tk.DoubleVar(value=5.0)  # default radius in meters
+        self.radius_var.trace_add('write', self.on_radius_change)
+        tk.Label(self.sidebar, text="Measurement Radius (m):", bg='#f4f4f4', font=title_font).pack(anchor='w')
+        self.radius_entry = ttk.Entry(self.sidebar, textvariable=self.radius_var)
+        self.radius_entry.pack(fill=tk.X, pady=(0, 20))
         
         # Measure
         tk.Label(self.sidebar, text="4. Measure:", bg='#f4f4f4', font=title_font).pack(anchor='w', pady=(0, 5))
@@ -136,11 +161,22 @@ class WifiHeatmapApp:
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.canvas.mpl_connect('button_press_event', self.on_map_click)
 
+    def on_radius_change(self, *args):
+        try:
+            r = self.radius_var.get()
+        except tk.TclError:
+            return
+        if self.pixels_per_meter and r is not None and r > 0:
+            px = r * self.pixels_per_meter
+            logger.info(f"Measurement radius changed to {r:.1f} m ({px:.1f} pixels at current calibration)")
+
     def load_interfaces(self):
-        display_names = []
+        logger.info("Detecting available Wi-Fi interfaces...")
+        display_names =[]
         self.interfaces_map = {}
         try:
             if self.os_name == 'Windows':
+                logger.info("Using Windows backend for interface detection.")
                 if HAS_PYWIFI:
                     wifi = pywifi.PyWiFi()
                     for iface in wifi.interfaces():
@@ -169,6 +205,7 @@ class WifiHeatmapApp:
                         self.interfaces_map[current_name] = current_name
                         display_names.append(current_name)
             elif self.os_name == 'Linux':
+                logger.info("Using Linux NMCLI backend for interface detection.")
                 output = subprocess.check_output(['nmcli', '-t', '-f', 'DEVICE,TYPE', 'device'], encoding='utf-8', errors='ignore')
                 for line in output.split('\n'):
                     if ':wifi' in line:
@@ -176,6 +213,7 @@ class WifiHeatmapApp:
                         self.interfaces_map[name] = name
                         display_names.append(name)
             elif self.os_name == 'Darwin':
+                logger.info("Using Darwin networksetup backend for interface detection.")
                 output = subprocess.check_output(['networksetup', '-listallhardwareports'], encoding='utf-8', errors='ignore')
                 lines = output.split('\n')
                 for i, line in enumerate(lines):
@@ -188,41 +226,52 @@ class WifiHeatmapApp:
         except Exception as e:
             logger.error(f"Error loading interfaces: {e}")
             
-        logger.info(f"Interfaces detected: {display_names}")
+        logger.info(f"Successfully detected {len(display_names)} interfaces: {display_names}")
             
         if display_names:
             self.interface_combo['values'] = display_names
             self.interface_combo.current(0)
+            logger.info(f"Default interface selected: {display_names[0]}")
         else:
             messagebox.showwarning("Wi-Fi Interfaces", "Could not find any Wi-Fi interfaces. Scanning might not work.")
+            logger.warning("No Wi-Fi interfaces could be detected.")
 
     def load_map(self):
+        logger.info("Opening file dialog to load a map image...")
         if self.original_image is not None:
+            logger.info("A map is already loaded. Prompting user for overwrite confirmation.")
             if not messagebox.askyesno("Confirm", "Loading a new map will delete all current measurements, calibrations, and session data. Continue?"):
+                logger.info("User cancelled loading a new map.")
                 return
                 
         file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp *.tiff")])
         if file_path:
             self.image_path = file_path
+            logger.info(f"User selected map image: {file_path}")
             try:
                 img = Image.open(file_path).convert('RGB')
                 self.original_image = np.array(img)
                 self.img_height, self.img_width = self.original_image.shape[:2]
                 
-                logger.info(f"Map image loaded: {file_path} ({self.img_width}x{self.img_height})")
+                logger.info(f"Map image successfully parsed and loaded into memory. Resolution: {self.img_width}x{self.img_height}")
                 
                 self.redraw_map()
                 
+                # Reset states
                 self.btn_calibrate['state'] = tk.NORMAL
                 self.btn_measure.config(state=tk.DISABLED, text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
                 self.btn_generate['state'] = tk.DISABLED
                 self.lbl_calibration.config(text="Not calibrated", fg='#cc0000')
                 self.pixels_per_meter = None
-                self.measurements = []
+                self.measurements =[]
                 self.update_ssid_dropdown()
                 self.lbl_status.config(text="Status: Map loaded")
+                logger.info("Application state reset following new map load.")
             except Exception as e:
+                logger.error(f"Failed to load map image {file_path}: {e}")
                 messagebox.showerror("Error", f"Failed to load image: {e}")
+        else:
+            logger.info("File dialog closed without selecting a map.")
 
     def redraw_map(self):
         self.fig.clf()
@@ -231,11 +280,9 @@ class WifiHeatmapApp:
         if self.original_image is not None:
             self.ax.imshow(self.original_image)
             
-            # Draw a border around the image to clearly show its bounds
             h, w = self.img_height, self.img_width
-            self.ax.plot([-0.5, w-0.5, w-0.5, -0.5, -0.5], [-0.5, -0.5, h-0.5, h-0.5, -0.5], color='black', linewidth=1.5)
+            self.ax.plot([-0.5, w-0.5, w-0.5, -0.5, -0.5],[-0.5, -0.5, h-0.5, h-0.5, -0.5], color='black', linewidth=1.5)
             
-            # Plot existing measurements
             if self.measurements:
                 x = [m['x'] for m in self.measurements]
                 y = [m['y'] for m in self.measurements]
@@ -245,38 +292,49 @@ class WifiHeatmapApp:
         self.canvas.draw()
 
     def start_calibration(self):
-        if self.original_image is None: return
+        logger.info("User initiated map calibration process.")
+        if self.original_image is None: 
+            logger.warning("Attempted to start calibration without a map loaded.")
+            return
         self.state = 'CALIBRATING'
-        self.calibration_points = []
+        self.calibration_points =[]
         self.lbl_status.config(text="Status: CALIBRATING\n(Click 1st point)")
         self.canvas.get_tk_widget().config(cursor="crosshair")
         self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
+        logger.info("Calibration mode activated. Waiting for user to click the 1st reference point.")
 
     def toggle_measuring(self):
+        logger.info("User toggled measuring mode.")
         if not self.selected_interface.get():
+            logger.warning("Measuring toggled without selecting a Wi-Fi interface.")
             messagebox.showwarning("Warning", "Please select a Wi-Fi interface first.")
             return
-        if self.original_image is None or self.pixels_per_meter is None: return
+        if self.original_image is None or self.pixels_per_meter is None: 
+            logger.warning("Measuring toggled but conditions not met (missing map or calibration).")
+            return
         
         if self.state == 'MEASURING':
             self.state = 'IDLE'
             self.lbl_status.config(text="Status: IDLE")
             self.canvas.get_tk_widget().config(cursor="")
             self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
+            logger.info("Measuring mode disabled. Reverting to IDLE state.")
         else:
             self.state = 'MEASURING'
             self.lbl_status.config(text="Status: MEASURING\n(Click on map to measure)")
             self.canvas.get_tk_widget().config(cursor="target")
             self.btn_measure.config(text="Stop Measuring", bg='#90ee90', relief=tk.SUNKEN)
+            logger.info("Measuring mode enabled. Awaiting user clicks on the map.")
 
     def on_map_click(self, event):
-        if event.xdata is None or event.ydata is None: return
+        if event.xdata is None or event.ydata is None: 
+            return
         
-        # Enforce that clicks must be strictly inside the image bounds
         if event.xdata < 0 or event.xdata >= self.img_width or event.ydata < 0 or event.ydata >= self.img_height:
             return
             
         x, y = int(event.xdata), int(event.ydata)
+        logger.info(f"Map clicked at pixel coordinates ({x}, {y}) during state: {self.state}")
         
         if self.state == 'CALIBRATING':
             self.calibration_points.append((x, y))
@@ -284,49 +342,55 @@ class WifiHeatmapApp:
             self.canvas.draw()
             
             if len(self.calibration_points) == 1:
+                logger.info(f"1st calibration point registered at ({x}, {y}). Waiting for 2nd point.")
                 self.lbl_status.config(text="Status: CALIBRATING\n(Click 2nd point)")
             elif len(self.calibration_points) == 2:
+                logger.info(f"2nd calibration point registered at ({x}, {y}). Processing calibration.")
                 self.canvas.get_tk_widget().config(cursor="")
                 self.state = 'IDLE'
                 self.lbl_status.config(text="Status: IDLE")
                 
-                # Ask for distance
                 distance = simpledialog.askfloat("Calibration", "Enter real distance between points in meters:")
                 if distance and distance > 0:
                     px_distance = np.sqrt((self.calibration_points[0][0] - self.calibration_points[1][0])**2 + 
                                           (self.calibration_points[0][1] - self.calibration_points[1][1])**2)
                     self.pixels_per_meter = px_distance / distance
-                    logger.info(f"Calibration complete: {self.pixels_per_meter:.2f} px/m (pixel distance: {px_distance:.1f}, real distance: {distance}m)")
+                    logger.info(f"Calibration successful. Real distance: {distance}m, Pixel distance: {px_distance:.2f}px. Ratio: {self.pixels_per_meter:.2f} px/m.")
                     self.lbl_calibration.config(text=f"Calibrated: {self.pixels_per_meter:.2f} px/m", fg='#008800')
                     self.btn_measure['state'] = tk.NORMAL
                     self.btn_generate['state'] = tk.NORMAL
                 else:
-                    self.redraw_map() # remove markers if cancelled
+                    logger.info("Calibration cancelled or invalid distance provided. Reverting map state.")
+                    self.redraw_map()
                     
         elif self.state == 'MEASURING':
+            logger.info(f"Initiating Wi-Fi measurement sequence at map coordinate ({x}, {y}).")
             self.lbl_status.config(text="Status: SCANNING\n(Please wait...)")
             self.canvas.get_tk_widget().config(cursor="wait")
             self.root.update()
             
-            # Take 3 measurements
-            scans = []
+            scans =[]
             for i in range(3):
+                logger.info(f"Executing scan pass {i+1} of 3...")
                 scan_res = self.scan_wifi_once()
                 scans.append(scan_res)
-                logger.info(f"Scan {i+1}/3 at ({x}, {y}) results: {scan_res}")
-                time.sleep(1) # Delay between scans
+                logger.info(f"Scan pass {i+1} completed. Found {len(scan_res)} networks.")
+                time.sleep(1)
                 
-            # Average the results
             avg_scan = {}
             all_ssids = set()
             for s in scans:
                 all_ssids.update(s.keys())
                 
             for ssid in all_ssids:
-                vals = [s[ssid] for s in scans if ssid in s]
-                avg_scan[ssid] = int(sum(vals) / len(vals))
+                entries = [s[ssid] for s in scans if ssid in s]
+                avg_signal = int(sum(e['signal'] for e in entries) / len(entries))
                 
-            logger.info(f"Recorded measurement at ({x}, {y}) for {len(avg_scan)} SSIDs: {avg_scan}")
+                # Assume the frequency doesn't change meaningfully across the 3 rapid scans
+                freq = entries[0]['freq']
+                avg_scan[ssid] = {'signal': avg_signal, 'freq': freq}
+                
+            logger.info(f"Aggregated measurement generated at ({x}, {y}) for {len(avg_scan)} unique SSIDs.")
             self.measurements.append({'x': x, 'y': y, 'ssids': avg_scan})
             self.update_ssid_dropdown()
             
@@ -335,38 +399,55 @@ class WifiHeatmapApp:
             
             self.lbl_status.config(text="Status: MEASURING\n(Click on map to measure)")
             self.canvas.get_tk_widget().config(cursor="target")
+            logger.info("Measurement sequence complete. Ready for next point.")
 
     def scan_wifi_once(self):
         display_name = self.selected_interface.get()
         interface = self.interfaces_map.get(display_name, display_name)
+        logger.info(f"Executing hardware Wi-Fi scan on interface '{interface}'...")
         results = {}
+
+        # 0% = -100 dBm, 100% = -40 dBm per strict table constraints
+        def dbm_to_percent(dbm_val):
+            return max(0, min(100, int(round((dbm_val + 100.0) * 100.0 / 60.0))))
+
         try:
             if self.os_name == 'Windows':
                 if HAS_PYWIFI and hasattr(interface, 'scan'):
-                    logger.info(f"Running hardware scan using pywifi")
+                    logger.info("Utilizing PyWiFi library for Windows scanning.")
                     interface.scan()
-                    time.sleep(2.5) # Give it time to scan
+                    time.sleep(2.5) 
                     scan_res = interface.scan_results()
                     for network in scan_res:
                         ssid_val = network.ssid.strip()
                         ssid = ssid_val if ssid_val else "[Hidden SSID]"
                         dbm = network.signal
-                        signal = max(0, min(100, int(2 * (dbm + 100))))
-                        if ssid not in results or signal > results[ssid]:
-                            results[ssid] = signal
-                            logger.info(f"Parsed PyWiFi SSID: {ssid}, Signal: {signal} (from {dbm} dBm)")
+                        signal = dbm_to_percent(dbm)
+                        
+                        freq_val = network.freq
+                        # Sometimes PyWiFi outputs channel, sometimes KHz, sometimes MHz depending on backend
+                        if freq_val < 200: freq = channel_to_freq(freq_val)
+                        elif freq_val > 10000: freq = freq_val / 1000.0
+                        else: freq = float(freq_val)
+                        
+                        if freq == 0: freq = 2400.0
+
+                        if ssid not in results or signal > results[ssid]['signal']:
+                            results[ssid] = {'signal': signal, 'freq': freq}
                 else:
-                    cmd = ['netsh', 'wlan', 'show', 'networks', f'interface={interface}', 'mode=bssid']
-                    logger.info(f"Running command: {' '.join(cmd)}")
+                    logger.info("Utilizing netsh utility for Windows scanning.")
+                    cmd =['netsh', 'wlan', 'show', 'networks', f'interface={interface}', 'mode=bssid']
                     try:
                         output_bytes = subprocess.check_output(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
                         output = output_bytes.decode('mbcs', errors='ignore')
                     except Exception as e:
-                        logger.error(f"Command failed: {e}")
+                        logger.error(f"netsh command failed: {e}")
                         output = ""
-                    logger.debug(f"Command output:\n{output}")
                     
                     current_ssid = ""
+                    current_bssid_info = {}
+                    bssid_list =[]
+                    
                     for line in output.split('\n'):
                         line = line.strip()
                         if line.startswith('SSID'):
@@ -374,89 +455,127 @@ class WifiHeatmapApp:
                             if len(parts) > 1:
                                 ssid_val = parts[1].strip()
                                 current_ssid = ssid_val if ssid_val else "[Hidden SSID]"
+                        elif line.startswith('BSSID'):
+                            if current_bssid_info: bssid_list.append(current_bssid_info)
+                            current_bssid_info = {'ssid': current_ssid, 'channel': None, 'signal': None}
+                        elif line.startswith('Channel') or line.startswith('Canal'):
+                            parts = line.split(':', 1)
+                            if len(parts) > 1 and current_bssid_info:
+                                try: current_bssid_info['channel'] = int(parts[1].strip())
+                                except: pass
                         elif ('%' in line and ':' in line) or line.startswith('Signal') or line.startswith('Señal'):
                             parts = line.split(':', 1)
-                            if len(parts) > 1 and current_ssid:
+                            if len(parts) > 1 and current_bssid_info:
                                 signal_str = parts[1].strip().replace('%', '')
                                 try:
-                                    signal = int(signal_str)
-                                    if current_ssid not in results or signal > results[current_ssid]:
-                                        results[current_ssid] = signal
-                                    logger.info(f"Parsed Windows SSID: {current_ssid}, Signal: {signal}")
+                                    win_pct = int(signal_str)
+                                    dbm = (win_pct / 2.0) - 100.0
+                                    current_bssid_info['signal'] = dbm_to_percent(dbm)
                                 except ValueError: pass
+                    if current_bssid_info:
+                        bssid_list.append(current_bssid_info)
+
+                    for b in bssid_list:
+                        if b['ssid'] and b['signal'] is not None:
+                            freq = channel_to_freq(b['channel']) if b['channel'] else 2400.0
+                            if b['ssid'] not in results or b['signal'] > results[b['ssid']]['signal']:
+                                results[b['ssid']] = {'signal': b['signal'], 'freq': freq}
+
             elif self.os_name == 'Linux':
+                logger.info("Utilizing nmcli utility for Linux scanning.")
                 try:
-                    logger.info(f"Forcing rescan on Linux: nmcli dev wifi rescan")
                     subprocess.run(['nmcli', 'dev', 'wifi', 'rescan'], check=False)
                     time.sleep(1)
-                except Exception as e:
-                    logger.error(f"Failed to force rescan: {e}")
+                except: pass
                     
-                cmd = ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list', 'ifname', interface]
+                # Format requested: SSID:SIGNAL:FREQ (e.g. MyNet:80:2412 MHz)
+                cmd =['nmcli', '-t', '-f', 'SSID,SIGNAL,FREQ', 'dev', 'wifi', 'list', 'ifname', interface]
                 output = subprocess.check_output(cmd, encoding='utf-8', errors='ignore')
                 for line in output.split('\n'):
-                    parts = line.split(':')
-                    if len(parts) >= 2:
-                        ssid_val = parts[0].strip()
+                    # nmcli escapes ':' inside SSID. Safest split is from the right for the last 2 metadata pieces
+                    parts = line.rsplit(':', 2)
+                    if len(parts) == 3:
+                        ssid_val = parts[0].replace('\\:', ':').strip()
                         ssid = ssid_val if ssid_val and ssid_val != '--' else "[Hidden SSID]"
                         signal_str = parts[1]
+                        freq_str = parts[2].replace(' MHz', '').strip()
                         try:
-                            signal = int(signal_str)
-                            if ssid not in results or signal > results[ssid]:
-                                results[ssid] = signal
+                            linux_pct = int(signal_str)
+                            dbm = (linux_pct / 2.0) - 100.0
+                            signal = dbm_to_percent(dbm)
+                            freq = float(freq_str) if freq_str.isdigit() else 2400.0
+                            
+                            if ssid not in results or signal > results[ssid]['signal']:
+                                results[ssid] = {'signal': signal, 'freq': freq}
                         except: pass
+
             elif self.os_name == 'Darwin':
-                cmd = ['/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport', interface, '-s']
+                logger.info("Utilizing airport utility for Darwin scanning.")
+                cmd =['/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport', interface, '-s']
                 output = subprocess.check_output(cmd, encoding='utf-8', errors='ignore')
                 lines = output.split('\n')[1:] 
                 for line in lines:
                     if not line.strip(): continue
-                    match = re.search(r'(.*?)\s+([0-9a-fA-F:]{17})\s+(-\d+)', line)
+                    # Columns: SSID BSSID RSSI CHANNEL HT CC SECURITY ...
+                    match = re.search(r'(.*?)\s+([0-9a-fA-F:]{17})\s+(-\d+)\s+([0-9,\-+]+)', line)
                     if match:
                         ssid_val = match.group(1).strip()
                         ssid = ssid_val if ssid_val else "[Hidden SSID]"
                         dbm_str = match.group(3)
+                        chan_str = match.group(4)
                         try:
                             dbm = int(dbm_str)
-                            # Convert dBm to approximate percentage (100% at -50dBm, 0% at -100dBm)
-                            signal = max(0, min(100, int(2 * (dbm + 100))))
-                            if ssid not in results or signal > results[ssid]:
-                                results[ssid] = signal
+                            signal = dbm_to_percent(dbm)
+                            
+                            # Channel might be "157,1", take base
+                            primary_chan = chan_str.split(',')[0].replace('-', '')
+                            freq = channel_to_freq(int(primary_chan)) if primary_chan.isdigit() else 2400.0
+
+                            if ssid not in results or signal > results[ssid]['signal']:
+                                results[ssid] = {'signal': signal, 'freq': freq}
                         except: pass
         except Exception as e:
-            logger.error(f"Error scanning: {e}")
+            logger.error(f"Critical error during Wi-Fi scan execution: {e}")
+            
+        logger.info(f"Hardware scan cycle complete. Processed {len(results)} networks.")
         return results
 
     def update_ssid_dropdown(self):
+        logger.info("Updating SSID dropdown with new measurement data.")
         all_ssids = set()
         for m in self.measurements:
             all_ssids.update(m['ssids'].keys())
-        
-        # Empty SSIDs are now tracked as [Hidden]
         
         ssids = sorted(list(all_ssids))
         self.ssid_combo['values'] = ssids
         if ssids and not self.selected_ssid.get() in ssids:
             self.ssid_combo.current(0)
+            logger.info(f"SSID dropdown refreshed. Total distinct networks: {len(ssids)}.")
 
     def generate_heatmap(self):
         ssid = self.selected_ssid.get()
+        logger.info(f"User requested to generate heatmap for SSID: '{ssid}'.")
         if not ssid:
+            logger.warning("Heatmap generation attempted without an SSID selected.")
             messagebox.showwarning("Warning", "No SSID selected.")
             return
             
         if ssid == "[Hidden SSID]":
+            logger.info("Notifying user about caveats of hidden SSID processing.")
             messagebox.showinfo("Hidden Networks", "You are generating a heatmap for [Hidden SSID] networks.\n\nPlease note that multiple distinct hidden networks might be grouped together under this label.")
             
-        x = [m['x'] for m in self.measurements if ssid in m['ssids']]
-        y = [m['y'] for m in self.measurements if ssid in m['ssids']]
-        z = [m['ssids'][ssid] for m in self.measurements if ssid in m['ssids']]
+        px = [m['x'] for m in self.measurements if ssid in m['ssids']]
+        py = [m['y'] for m in self.measurements if ssid in m['ssids']]
+        pz = [m['ssids'][ssid]['signal'] for m in self.measurements if ssid in m['ssids']]
+        pf = [m['ssids'][ssid]['freq'] for m in self.measurements if ssid in m['ssids']]
         
-        if len(x) < 3:
-            messagebox.showwarning("Warning", "Need at least 3 points for this SSID to generate a heatmap.")
+        if len(px) < 1:
+            logger.warning(f"Heatmap generation aborted: Insufficient measurement points for SSID '{ssid}'.")
+            messagebox.showwarning("Warning", "Need at least 1 point for this SSID to generate a heatmap.")
             return
             
         try:
+            logger.info(f"Initiating heatmap calculation for '{ssid}' with {len(px)} target points.")
             self.state = 'IDLE'
             self.canvas.get_tk_widget().config(cursor="")
             self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
@@ -465,27 +584,90 @@ class WifiHeatmapApp:
             
             # Setup Grid
             grid_x, grid_y = np.mgrid[0:self.img_width:200j, 0:self.img_height:200j]
+            logger.info(f"Mathematical interpolation grid constructed over {self.img_width}x{self.img_height} area.")
             
-            # Interpolate
-            grid_z = scipy.interpolate.griddata((x, y), z, (grid_x, grid_y), method='cubic')
-            
-            # Fallback to linear or nearest if cubic fails (e.g., points are collinear)
-            if np.all(np.isnan(grid_z)):
-                 grid_z = scipy.interpolate.griddata((x, y), z, (grid_x, grid_y), method='linear')
-            if np.all(np.isnan(grid_z)):
-                 grid_z = scipy.interpolate.griddata((x, y), z, (grid_x, grid_y), method='nearest')
+            # Convert user radius (meters) to pixels using calibration
+            try:
+                radius_m = self.radius_var.get()
+            except tk.TclError:
+                radius_m = 5.0
+            radius_px = radius_m * self.pixels_per_meter if self.pixels_per_meter else 0
+            logger.info(f"Using measurement propagation radius of {radius_m}m ({radius_px:.1f} pixels).")
+
+            # Initialize arrays for physical linear power (mW) tracking
+            Z_num = np.zeros(grid_x.shape, dtype=float)
+            W_sum = np.zeros(grid_x.shape, dtype=float)
+            eps = 1e-6
+
+            logger.info("Applying theoretical frequency propagation models based on Free-Space Path Loss formulas...")
+
+            # Iterate over points applying specific physical propagation formulas matching the measured frequencies
+            for xi, yi, zi_percent, freq_mhz in zip(px, py, pz, pf):
+                # Back-convert unified % back to physical dBm
+                zi_dbm = (zi_percent * 60.0 / 100.0) - 100.0
+
+                dx = grid_x - xi
+                dy = grid_y - yi
+                dist_px = np.sqrt(dx*dx + dy*dy)
+                
+                dist_m = dist_px / self.pixels_per_meter if self.pixels_per_meter else dist_px
+
+                mask = (dist_px <= radius_px) if radius_px > 0 else np.ones_like(dist_px, dtype=bool)
+                if not np.any(mask):
+                    continue
+                
+                # Assume signals decay theoretically relative to known measured points over distance
+                # Use 1 meter as reference boundary distance for mathematical stability 
+                # Calculation specific to the unique frequency (MHz) of the AP providing this reading
+                loss_1m = 20 * np.log10(0.001) + 20 * np.log10(freq_mhz) + 32.44
+                
+                dist_km = np.clip(dist_m, 1.0, None) / 1000.0
+                loss_d = 20 * np.log10(dist_km) + 20 * np.log10(freq_mhz) + 32.44
+                
+                # Difference relative to the 1m reference boundary point
+                loss_diff = loss_d - loss_1m
+                
+                # Signal drop mapped dynamically
+                predicted_dbm = np.where(mask, zi_dbm - loss_diff, -100.0)
+                
+                # Convert prediction back to physical linear power for interpolation
+                predicted_mw = 10.0 ** (predicted_dbm / 10.0)
+                
+                # The energy density drops with the square of the distance (1 / d^2)
+                with np.errstate(divide='ignore'):
+                    w = np.where(mask, 1.0 / (dist_m**2 + eps), 0.0)
+
+                # Accumulate linear weighted values
+                Z_num += w * predicted_mw
+                W_sum += w
+
+            logger.info("Normalizing cumulative signal matrices and converting back to perceptual percentage...")
+            # Normalize linear power
+            with np.errstate(divide='ignore', invalid='ignore'):
+                grid_mw = Z_num / W_sum
+
+            # Convert physically blended signal back to dBm, then the UI-friendly unified Percentage
+            with np.errstate(divide='ignore', invalid='ignore'):
+                grid_z_dbm = 10.0 * np.log10(grid_mw)
+
+            grid_z = (grid_z_dbm + 100.0) * 100.0 / 60.0
+            grid_z = np.clip(grid_z, 0.0, 100.0)
+            grid_z[W_sum == 0] = np.nan  
                  
             self.redraw_map()
             
-            self.show_heatmap_window(ssid, grid_z, x, y, z)
+            logger.info("Heatmap calculation complete. Spawning visualization window...")
+            self.show_heatmap_window(ssid, grid_z, px, py, pz)
             
             self.lbl_status.config(text="Status: IDLE")
             
         except Exception as e:
+            logger.error(f"Critical error during heatmap generation calculations: {e}", exc_info=True)
             messagebox.showerror("Error", f"Failed to generate heatmap: {e}")
             self.lbl_status.config(text="Status: IDLE")
 
     def show_heatmap_window(self, ssid, grid_z, x, y, z):
+        logger.info(f"Rendering standalone heatmap window for SSID '{ssid}'...")
         top = tk.Toplevel(self.root)
         top.title(f"Wifi Heatmap of {ssid}")
         top.geometry("800x650")
@@ -495,8 +677,24 @@ class WifiHeatmapApp:
         ax.axis('off')
         
         ax.imshow(self.original_image)
-        im = ax.imshow(grid_z.T, extent=(0, self.img_width, self.img_height, 0), origin='upper', alpha=0.6, cmap='RdYlGn', vmin=0, vmax=100)
-        sc = ax.scatter(x, y, c=z, cmap='RdYlGn', edgecolors='black', s=50, vmin=0, vmax=100)
+
+        # Applying exactly the color ranges required:
+        # > 75% -> solid Green
+        # 75% - 50% -> gradient Turquoise to Blue
+        # < 40% -> Yellow to Red
+        colors_list =[
+            (0.00, 'red'),
+            # (0.00, 'red'),
+            (0.40, 'yellow'),
+            # (0.50, 'blue'),
+            (0.75, 'turquoise'),
+            # (0.751, 'green'),
+            (1.00, 'darkgreen')
+        ]
+        wifi_cmap = LinearSegmentedColormap.from_list('wifi_cmap', colors_list)
+
+        im = ax.imshow(grid_z.T, extent=(0, self.img_width, self.img_height, 0), origin='upper', alpha=0.6, cmap=wifi_cmap, vmin=0, vmax=100)
+        sc = ax.scatter(x, y, c=z, cmap=wifi_cmap, edgecolors='black', s=50, vmin=0, vmax=100)
         fig.colorbar(im, ax=ax, label='Signal Strength (%)')
         ax.set_title(f"Heatmap for {ssid}")
         fig.tight_layout()
@@ -504,97 +702,123 @@ class WifiHeatmapApp:
         canvas = FigureCanvasTkAgg(fig, master=top)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         canvas.draw()
+        logger.info("Heatmap visualization successfully drawn and displayed.")
         
         def save_png():
             safe_ssid = "".join([c for c in ssid if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+            logger.info("Opening save dialog for heatmap PNG export...")
             filepath = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG Image", "*.png")], initialfile=f"Heatmap_{safe_ssid}.png", parent=top)
             if filepath:
+                logger.info(f"User chose to save heatmap PNG to: {filepath}")
                 fig.savefig(filepath, dpi=300, bbox_inches='tight')
+                logger.info("Heatmap successfully exported.")
                 messagebox.showinfo("Success", "Heatmap exported successfully!", parent=top)
+            else:
+                logger.info("Heatmap PNG export cancelled by user.")
                 
         btn_frame = tk.Frame(top, bg='#f4f4f4', pady=10)
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Button(btn_frame, text="Export as PNG", command=save_png).pack()
 
     def save_session(self):
+        logger.info("User requested to save the current session.")
         if not self.measurements and self.original_image is None:
+            logger.warning("Save session aborted: No valid map or measurements exist in the current state.")
             messagebox.showinfo("Info", "Nothing to save.")
             return
             
         file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON Files", "*.json")])
         if file_path:
+            logger.info(f"Target file for session save: {file_path}")
             try:
-                # Encode the image as base64 for portability
                 image_b64 = None
                 if self.original_image is not None:
+                    logger.info("Encoding map image to base64 for embedding in session file...")
                     img = Image.fromarray(self.original_image)
                     buf = io.BytesIO()
                     img.save(buf, format='PNG')
                     image_b64 = base64.b64encode(buf.getvalue()).decode('ascii')
                 
+                try:
+                    current_radius = self.radius_var.get()
+                except tk.TclError:
+                    current_radius = 5.0
+                    
                 data = {
                     'image_base64': image_b64,
                     'pixels_per_meter': self.pixels_per_meter,
-                    'measurements': self.measurements
+                    'measurements': self.measurements,
+                    'radius': current_radius
                 }
+                
+                logger.info("Writing JSON payload to disk...")
                 with open(file_path, 'w') as f:
                     json.dump(data, f)
-                logger.info(f"Session saved to {file_path} ({len(self.measurements)} measurements)")
+                logger.info(f"Session completely saved to {file_path}. Included {len(self.measurements)} measurement points.")
                 messagebox.showinfo("Success", "Session saved successfully.")
             except Exception as e:
+                logger.error(f"Critical failure while attempting to save session: {e}", exc_info=True)
                 messagebox.showerror("Error", f"Failed to save session: {e}")
+        else:
+            logger.info("Save session cancelled by user.")
 
     def load_session(self):
+        logger.info("User requested to load an existing session file. Opening file dialog...")
         file_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
         if file_path:
             try:
-                logger.info(f"Loading session from {file_path}")
+                logger.info(f"Initiating session payload load from {file_path}...")
                 with open(file_path, 'r') as f:
                     data = json.load(f)
                 
-                # Try base64 image first, fall back to image_path for old session files
                 image_b64 = data.get('image_base64')
                 if image_b64:
+                    logger.info("Decoding embedded base64 map image from session file...")
                     img_bytes = base64.b64decode(image_b64)
                     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
                     self.original_image = np.array(img)
                     self.img_height, self.img_width = self.original_image.shape[:2]
                     self.image_path = None
-                    logger.info(f"Map image loaded from embedded base64 ({self.img_width}x{self.img_height})")
+                    logger.info(f"Map image loaded successfully. Dimensions: ({self.img_width}x{self.img_height})")
                 else:
-                    img_path = data.get('image_path')
-                    if img_path and os.path.exists(img_path):
-                        self.image_path = img_path
-                        img = Image.open(img_path).convert('RGB')
-                        self.original_image = np.array(img)
-                        self.img_height, self.img_width = self.original_image.shape[:2]
-                        logger.info(f"Map image loaded from path: {img_path} ({self.img_width}x{self.img_height})")
-                    else:
-                        messagebox.showwarning("Warning", "Saved map image not found. Please load a map manually.")
+                    logger.warning("No embedded base64 image found in the session payload.")
+                    messagebox.showwarning("Warning", "No map image found in session file.")
                     
                 self.pixels_per_meter = data.get('pixels_per_meter')
-                self.measurements = data.get('measurements', [])
+                self.measurements = data.get('measurements',[])
+                
+                loaded_radius = data.get('radius')
+                if loaded_radius is not None:
+                    self.radius_var.set(loaded_radius)
+                    logger.info(f"Restored measurement scan radius to {loaded_radius:.1f} meters.")
                 
                 if self.original_image is not None:
+                    logger.info("Redrawing GUI map view with loaded image payload.")
                     self.redraw_map()
                     self.btn_calibrate['state'] = tk.NORMAL
                     
                 if self.pixels_per_meter:
+                    logger.info(f"Restoring calibration matrix. Pixels per meter: {self.pixels_per_meter:.2f}")
                     self.lbl_calibration.config(text=f"Calibrated: {self.pixels_per_meter:.2f} px/m", fg='#008800')
                     self.btn_measure['state'] = tk.NORMAL
                     self.btn_generate['state'] = tk.NORMAL
                 else:
+                    logger.info("Loaded session lacks calibration metadata.")
                     self.lbl_calibration.config(text="Not calibrated", fg='#cc0000')
                     self.btn_measure['state'] = tk.DISABLED
                     self.btn_generate['state'] = tk.DISABLED
                     
                 self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
                 self.update_ssid_dropdown()
-                logger.info(f"Session loaded successfully ({len(self.measurements)} measurements, calibration: {self.pixels_per_meter})")
+                
+                logger.info(f"Session restoration fully complete. Successfully extracted {len(self.measurements)} measurement data points.")
                 messagebox.showinfo("Success", "Session loaded successfully.")
                 
             except Exception as e:
+                logger.error(f"Critical failure while attempting to load session payload: {e}", exc_info=True)
                 messagebox.showerror("Error", f"Failed to load session: {e}")
+        else:
+            logger.info("Load session cancelled by user.")
 
 if __name__ == "__main__":
     root = tk.Tk()
