@@ -23,7 +23,7 @@ except ImportError:
 
 # Setup argument parser for configuration
 parser = argparse.ArgumentParser(description="Wi-Fi Heatmap Generator")
-parser.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], help='Set the logging level')
+parser.add_argument('--log-level', default='WARNING', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], help='Set the logging level')
 args, unknown = parser.parse_known_args()
 
 logging.basicConfig(level=getattr(logging, args.log_level), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout, force=True)
@@ -395,7 +395,7 @@ class WifiHeatmapApp:
     def scan_wifi_once(self):
         display_name = self.selected_interface.get()
         interface = self.interfaces_map.get(display_name, display_name)
-        logger.info(f"Executing hardware Wi-Fi scan on interface '{interface}'...")
+        logger.info(f"Executing hardware Wi-Fi scan on interface '{display_name}'...")
         results = {}
 
         # 0% = -100 dBm, 100% = -40 dBm per strict table constraints
