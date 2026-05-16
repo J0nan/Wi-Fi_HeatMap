@@ -294,6 +294,52 @@ class WifiHeatmapApp:
         self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
         logger.info("Calibration mode activated. Waiting for user to click the 1st reference point.")
 
+    def is_wifi_on(self, interface):
+        """Check if the Wi-Fi interface is powered on."""
+        logger.info("Checking Wi-Fi power state...")
+        if hasattr(interface, 'name'):
+            iface_name = interface.name()
+        else:
+            iface_name = str(interface)
+            
+        try:
+            if self.os_name == 'Windows':
+                cmd = ['netsh', 'wlan', 'show', 'interfaces', f'name={iface_name}']
+                try:
+                    output = subprocess.check_output(cmd, creationflags=subprocess.CREATE_NO_WINDOW, encoding='mbcs', errors='ignore').lower()
+                except:
+                    # Fallback to all interfaces if specific name fails
+                    output = subprocess.check_output(['netsh', 'wlan', 'show', 'interfaces'], creationflags=subprocess.CREATE_NO_WINDOW, encoding='mbcs', errors='ignore').lower()
+                
+                # Check for localized strings indicating "Off" status
+                off_indicators = [
+                    'software off', 'hardware off', 
+                    'software desactivado', 'hardware desactivado', 
+                    'software aus', 'hardware aus', 
+                    'software désactivé', 'hardware désactivé', 
+                    'software desligado', 'hardware desligado', 
+                    'software disattivato', 'hardware disattivato'
+                ]
+                if any(ind in output for ind in off_indicators):
+                    return False
+                return True
+                
+            elif self.os_name == 'Linux':
+                output = subprocess.check_output(['nmcli', 'radio', 'wifi'], encoding='utf-8', errors='ignore').strip().lower()
+                if output == 'disabled':
+                    return False
+                return True
+                
+            elif self.os_name == 'Darwin':
+                output = subprocess.check_output(['networksetup', '-getairportpower', iface_name], encoding='utf-8', errors='ignore').strip().lower()
+                if 'off' in output:
+                    return False
+                return True
+        except Exception as e:
+            logger.warning(f"Could not determine Wi-Fi power state reliably: {e}")
+            
+        return True # Default to True so we don't block scanning if check fails
+
     def toggle_measuring(self):
         logger.info("User toggled measuring mode.")
         if not self.selected_interface.get():
@@ -311,6 +357,13 @@ class WifiHeatmapApp:
             self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
             logger.info("Measuring mode disabled. Reverting to IDLE state.")
         else:
+            display_name = self.selected_interface.get()
+            interface = self.interfaces_map.get(display_name, display_name)
+            if not self.is_wifi_on(interface):
+                logger.warning("Attempted to start measuring but Wi-Fi adapter is powered off.")
+                messagebox.showwarning("Wi-Fi is Off", "The selected Wi-Fi adapter appears to be powered off.\nPlease turn it on before measuring.")
+                return
+
             self.state = 'MEASURING'
             self.lbl_status.config(text="Status: MEASURING\n(Click on map to measure)")
             self.canvas.get_tk_widget().config(cursor="target")
@@ -355,6 +408,14 @@ class WifiHeatmapApp:
                     self.redraw_map()
                     
         elif self.state == 'MEASURING':
+            display_name = self.selected_interface.get()
+            interface = self.interfaces_map.get(display_name, display_name)
+            if not self.is_wifi_on(interface):
+                logger.warning("Wi-Fi adapter is powered off during measurement.")
+                messagebox.showwarning("Wi-Fi is Off", "The selected Wi-Fi adapter appears to be powered off.\nPlease turn it on before measuring.")
+                self.toggle_measuring()
+                return
+
             logger.info(f"Initiating Wi-Fi measurement sequence at map coordinate ({x}, {y}).")
             self.lbl_status.config(text="Status: SCANNING\n(Please wait...)")
             self.canvas.get_tk_widget().config(cursor="wait")
