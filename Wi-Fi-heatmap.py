@@ -807,7 +807,20 @@ class WifiHeatmapApp:
             filepath = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG Image", "*.png")], initialfile=f"Heatmap_{safe_ssid}.png", parent=top)
             if filepath:
                 logger.info(f"User chose to save heatmap PNG to: {filepath}")
+                
+                # Hide tooltip and icon before export
+                was_visible = tooltip.get_visible()
+                if was_visible:
+                    tooltip.set_visible(False)
+                help_icon.set_visible(False)
+                    
                 fig.savefig(filepath, dpi=300, bbox_inches='tight')
+                
+                # Restore tooltip and icon visibility
+                if was_visible:
+                    tooltip.set_visible(True)
+                help_icon.set_visible(True)
+                    
                 logger.info("Heatmap successfully exported.")
                 messagebox.showinfo("Success", "Heatmap exported successfully!", parent=top)
             else:
