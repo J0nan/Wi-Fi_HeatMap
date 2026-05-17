@@ -12,7 +12,8 @@ A cross-platform Python GUI application that allows you to map Wi-Fi signal stre
 - [Installation](#installation)
 - [OS-Specific Requirements](#os-specific-requirements)
 - [How to Use](#how-to-use)
-  - [Windows](#windows)
+  - [Windows CMD](#windows-cmd)
+  - [Windows PowerShell](#windows-powershell)
   - [Linux](#linux)
   - [Step-by-Step Guide](#step-by-step-guide)
 - [How it Works](#how-it-works)
@@ -30,14 +31,6 @@ A cross-platform Python GUI application that allows you to map Wi-Fi signal stre
   - [Why This Matters](#why-this-matters)
 - [Debugging](#debugging)
 - [License](#license)
-
-<!-- ## Key Features
-
-* **Cross-Platform Compatibility:** Native support for Windows (`netsh` or `pywifi`), macOS (`airport`), and Linux (`nmcli`).
-* **Physics-Based Interpolation:** Does not rely on generic averaging. Signal degradation is simulated using the Free-Space Path Loss (FSPL) formula (`20 log10(d) + 20 log10(f) + 32.44`), correctly accounting for the specific frequency (e.g., 2.4 GHz vs 5 GHz) of each Access Point.
-* **Strict Signal Mapping:** Translates hardware RSSI (dBm) into a rigorous, user-friendly percentage scale where `-40 dBm = 100%` and `-100 dBm = 0%`.
-* **Session Management:** Save your progress to a `.json` file (which natively embeds your map image) and load it later to continue measuring.
-* **PNG Export:** Export your generated heatmaps as high-resolution images. -->
 
 ## Installation
 
@@ -70,11 +63,9 @@ A cross-platform Python GUI application that allows you to map Wi-Fi signal stre
    pip install -r requirements.txt
    ```
 
-Note: On some Linux distributions, you may also need to install the system package for Tkinter, e.g., `sudo apt install python3-tk`
-
 ## OS-Specific Requirements
 
-- **Windows:** Works out of the box using `netsh`. The `pywifi` library is also supported for faster hardware-level access if installed.
+- **Windows:** Works out of the box using `netsh`. The `pywifi` library is also supported and recommended (it is installed with the `requirements.txt`).
 <!-- WILL HAVE TO CHECK WITH A MAC * **macOS:** Utilizes the hidden `airport` system utility (`/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport`). **Note:** You may need to grant terminal/Python location or network scanning permissions in macOS System Settings. -->
 - **Linux:** Requires NetworkManager (`nmcli`) to be installed and active. Scanning requires sufficient privileges; running as `sudo` might be necessary depending on your distro's network permissions.
 
@@ -82,10 +73,18 @@ Note: On some Linux distributions, you may also need to install the system packa
 
 Run the application from your terminal:
 
-### Windows
+### Windows CMD
 
 ```bash
 .\Wi-Fi_HeatMap\Scripts\activate.bat
+python Wi-Fi-heatmap.py
+```
+
+### Windows PowerShell
+
+```bash
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
+.\Wi-Fi_HeatMap\Scripts\activate.ps1
 python Wi-Fi-heatmap.py
 ```
 
@@ -125,8 +124,8 @@ This section is aimed at developers who want to understand the codebase. The ent
 │                        main()                            │
 │  Creates Tk root → WifiHeatmapApp(root) → mainloop()     │
 └──────────────────────────────────────────────────────────┘
-                             │
-                             ▼
+                           │
+                           ▼
 ┌──────────────────────────────────────────────────────────┐
 │                  WifiHeatmapApp.__init__                 │
 │  1. Detects OS (platform.system())                       │
