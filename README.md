@@ -12,6 +12,8 @@ A cross-platform Python GUI application that allows you to map Wi-Fi signal stre
 - [Installation](#installation)
 - [OS-Specific Requirements](#os-specific-requirements)
 - [How to Use](#how-to-use)
+  - [Windows](#windows)
+  - [Linux](#linux)
   - [Step-by-Step Guide](#step-by-step-guide)
 - [How it Works](#how-it-works)
   - [Architecture Overview](#architecture-overview)
@@ -79,6 +81,15 @@ Note: On some Linux distributions, you may also need to install the system packa
 ## How to Use
 
 Run the application from your terminal:
+
+### Windows
+
+```bash
+.\Wi-Fi_HeatMap\Scripts\activate.bat
+python Wi-Fi-heatmap.py
+```
+
+### Linux
 
 ```bash
 source ./Wi-Fi_HeatMap/bin/activate
