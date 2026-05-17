@@ -247,16 +247,18 @@ class WifiHeatmapApp:
                 
                 logger.info(f"Map image successfully parsed and loaded into memory. Resolution: {self.img_width}x{self.img_height}")
                 
+                # Reset states
+                self.pixels_per_meter = None
+                self.measurements = []
+                self.calibration_points = []
+                self.update_ssid_dropdown()
+
                 self.redraw_map()
                 
-                # Reset states
                 self.btn_calibrate['state'] = tk.NORMAL
                 self.btn_measure.config(state=tk.DISABLED, text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
                 self.btn_generate['state'] = tk.DISABLED
                 self.lbl_calibration.config(text="Not calibrated", fg='#cc0000')
-                self.pixels_per_meter = None
-                self.measurements =[]
-                self.update_ssid_dropdown()
                 self.lbl_status.config(text="Status: Map loaded")
                 logger.info("Application state reset following new map load.")
             except Exception as e:
@@ -606,7 +608,9 @@ class WifiHeatmapApp:
         if ssids and not self.selected_ssid.get() in ssids:
             self.ssid_combo.current(0)
             logger.info(f"SSID dropdown refreshed. Total distinct networks: {len(ssids)}.")
-
+        elif not ssids:
+            self.selected_ssid.set('')
+            logger.info("SSID dropdown cleared. No networks available.")
     def generate_heatmap(self):
         ssid = self.selected_ssid.get()
         logger.info(f"User requested to generate heatmap for SSID: '{ssid}'.")
