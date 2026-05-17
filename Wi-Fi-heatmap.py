@@ -292,6 +292,7 @@ class WifiHeatmapApp:
             return
         self.state = 'CALIBRATING'
         self.calibration_points =[]
+        self.redraw_map()
         self.lbl_status.config(text="Status: CALIBRATING\n(Click 1st point)")
         self.canvas.get_tk_widget().config(cursor="crosshair")
         self.btn_measure.config(text="Start Measuring", bg='#e0e0e0', relief=tk.RAISED)
@@ -421,7 +422,7 @@ class WifiHeatmapApp:
 
             logger.info(f"Initiating Wi-Fi measurement sequence at map coordinate ({x}, {y}).")
             self.lbl_status.config(text="Status: SCANNING\n(Please wait...)")
-            self.canvas.get_tk_widget().config(cursor="wait")
+            self.canvas.get_tk_widget().config(cursor="watch")
             self.root.update()
             
             scans =[]
@@ -799,9 +800,6 @@ class WifiHeatmapApp:
         
         canvas = FigureCanvasTkAgg(fig, master=top)
         canvas.mpl_connect('motion_notify_event', on_hover)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        canvas.draw()
-        logger.info("Heatmap visualization successfully drawn and displayed.")
         
         def save_png():
             safe_ssid = "".join([c for c in ssid if c.isalpha() or c.isdigit() or c==' ']).rstrip()
@@ -818,6 +816,10 @@ class WifiHeatmapApp:
         btn_frame = tk.Frame(top, bg='#f4f4f4', pady=10)
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Button(btn_frame, text="Export as PNG", command=save_png).pack()
+
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        canvas.draw()
+        logger.info("Heatmap visualization successfully drawn and displayed.")
 
     def save_session(self):
         logger.info("User requested to save the current session.")
