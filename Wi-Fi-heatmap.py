@@ -45,6 +45,7 @@ def channel_to_freq(channel):
     """Convert Wi-Fi channel to theoretical center frequency in MHz."""
     try:
         ch = int(channel)
+        logger.debug(f"Converting channel {ch} to frequency...")
 
         if ch == 14:
             return 2484.0
@@ -427,6 +428,7 @@ class WifiHeatmapApp:
                 scan_res = self.scan_wifi_once()
                 scans.append(scan_res)
                 logger.info(f"Scan pass {i+1} completed. Found {len(scan_res)} networks.")
+                logger.info(f"Scan pass {i+1} results: {scan_res}")
                 time.sleep(1)
                 
             avg_scan = {}
@@ -442,6 +444,7 @@ class WifiHeatmapApp:
                 freq = entries[0]['freq']
                 avg_scan[ssid] = {'signal': avg_signal, 'freq': freq}
                 
+            logger.info(f"Averaged scan results: {avg_scan}")
             logger.info(f"Aggregated measurement generated at ({x}, {y}) for {len(avg_scan)} unique SSIDs.")
             self.measurements.append({'x': x, 'y': y, 'ssids': avg_scan})
             self.update_ssid_dropdown()
@@ -459,7 +462,7 @@ class WifiHeatmapApp:
         logger.info(f"Executing hardware Wi-Fi scan on interface '{display_name}'...")
         results = {}
 
-        # 0% = -100 dBm, 100% = -40 dBm per strict table constraints
+        # 0% = -100 dBm, 100% = -40 dBm
         def dbm_to_percent(dbm_val):
             return max(0, min(100, int(round((dbm_val + 100.0) * 100.0 / 60.0))))
 
@@ -607,6 +610,7 @@ class WifiHeatmapApp:
     def generate_heatmap(self):
         ssid = self.selected_ssid.get()
         logger.info(f"User requested to generate heatmap for SSID: '{ssid}'.")
+        logger.debug(f"Measurements array length: {len(self.measurements)}")
         if not ssid:
             logger.warning("Heatmap generation attempted without an SSID selected.")
             messagebox.showwarning("Warning", "No SSID selected.")
@@ -736,9 +740,10 @@ class WifiHeatmapApp:
         # - < 40% Unreliable signal ()
         
         colors_list =[
-            (0.00, 'red'),
-            (0.40, 'red'),
-            (0.60, 'blue'),
+            (0.00, 'black'),
+            (0.34, 'black'),
+            (0.35, 'red'),
+            (0.75, 'blue'),
             (1.00, 'green')
         ]
         wifi_cmap = LinearSegmentedColormap.from_list('wifi_cmap', colors_list)
@@ -772,6 +777,7 @@ class WifiHeatmapApp:
 
     def save_session(self):
         logger.info("User requested to save the current session.")
+        logger.debug(f"Current pixels_per_meter: {self.pixels_per_meter}, Measurements: {len(self.measurements)}")
         if not self.measurements and self.original_image is None:
             logger.warning("Save session aborted: No valid map or measurements exist in the current state.")
             messagebox.showinfo("Info", "Nothing to save.")
