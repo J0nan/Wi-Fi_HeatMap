@@ -737,7 +737,7 @@ class WifiHeatmapApp:
         # - > 75% Good signal
         # - < 75% and > 50% Acceptable signal
         # - < 50% and > 40% Weak signal
-        # - < 40% Unreliable signal ()
+        # - < 40% Unreliable signal
         
         colors_list =[
             (0.00, 'black'),
@@ -750,11 +750,51 @@ class WifiHeatmapApp:
 
         im = ax.imshow(grid_z.T, extent=(0, self.img_width, self.img_height, 0), origin='upper', alpha=0.6, cmap=wifi_cmap, vmin=0, vmax=100)
         sc = ax.scatter(x, y, c=z, cmap=wifi_cmap, edgecolors='black', s=50, vmin=0, vmax=100)
-        fig.colorbar(im, ax=ax, label='Signal Strength (%)')
+        cbar = fig.colorbar(im, ax=ax, label='Signal Strength (%)')
+        
+        # Add a help icon next to the legend (colorbar)
+        cbar_ax = cbar.ax
+        help_icon = cbar_ax.annotate(' ? ', xy=(0.5, 1.05), xycoords='axes fraction',
+                                     ha='center', va='bottom', fontsize=10, fontweight='bold',
+                                     bbox=dict(boxstyle='circle,pad=0.1', fc='lightyellow', ec='black', alpha=0.8))
+
+        tooltip_text = (
+            "Signal Quality Guide:\n"
+            "> 75% : Good\n"
+            "75% - 50% : Acceptable\n"
+            "50% - 40% : Weak\n"
+            "< 40% : Unreliable"
+        )
+        
+        tooltip = cbar_ax.annotate(
+            tooltip_text,
+            xy=(0, 1.05), xycoords='axes fraction',
+            xytext=(-10, 0), textcoords='offset points',
+            ha='right', va='top',
+            bbox=dict(boxstyle='round,pad=0.5', fc='#ffffe0', ec='black', alpha=0.9),
+            fontsize=9,
+            visible=False,
+            zorder=100
+        )
+
+        def on_hover(event):
+            if event.x is None or event.y is None:
+                return
+            cont, _ = help_icon.contains(event)
+            if cont:
+                if not tooltip.get_visible():
+                    tooltip.set_visible(True)
+                    fig.canvas.draw_idle()
+            else:
+                if tooltip.get_visible():
+                    tooltip.set_visible(False)
+                    fig.canvas.draw_idle()
+
         ax.set_title(f"Heatmap for {ssid}")
         fig.tight_layout()
         
         canvas = FigureCanvasTkAgg(fig, master=top)
+        canvas.mpl_connect('motion_notify_event', on_hover)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         canvas.draw()
         logger.info("Heatmap visualization successfully drawn and displayed.")
