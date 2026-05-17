@@ -49,13 +49,17 @@ A cross-platform Python GUI application that allows you to map Wi-Fi signal stre
 2. **Create a virtual environment**
 
    ```bash
-   python3 -m venv Wi-Fi_HeatMap
+   python -m venv Wi-Fi_HeatMap
    ```
 
 3. **Activate virtual environment**
 
    ```bash
+   # Linux
    source ./Wi-Fi_HeatMap/bin/activate
+
+   # Windows
+   .\Wi-Fi_HeatMap\Scripts\activate.bat
    ```
 
 4. **Install the required dependencies:**
