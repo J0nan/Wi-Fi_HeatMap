@@ -202,7 +202,7 @@ This is the core computation. Given all measurement points for a selected SSID, 
 
    $$dBm = \left(\frac{percent \times 60}{100}\right) - 100$$
 
-   b. **Reverse FSPL → virtual AP distance:** Using a reference transmit power of 0 dBm, the path loss observed at the measurement point is inverted to find how far the AP _appears_ to be:
+   b. **Reverse FSPL → virtual AP distance:** Using a reference transmit power of 0 dBm, the path loss observed at the measurement point is inverted to find how far the AP *appears* to be:
 
    $$d_{AP} (km) = 10^{\frac{PathLoss - 20\log_{10}(f) - 32.44}{20}}$$
 
