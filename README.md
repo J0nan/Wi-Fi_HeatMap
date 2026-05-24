@@ -2,6 +2,10 @@
 
 A cross-platform Python GUI application that allows you to map Wi-Fi signal strength over a floor plan or map image. By taking signal measurements at various points in a physical space, the tool generates an interpolated, physics-based heatmap to visualize your exact network coverage.
 
+**Example**:
+
+![HeatMap](Photos/Heatmap_WiFi2.png)
+
 ## NOTES <!-- omit in toc -->
 
 - Not tested on MAC
@@ -99,18 +103,23 @@ python Wi-Fi-heatmap.py
 
 1. **Select Interface:** Choose your active Wi-Fi adapter from the dropdown on the left panel.
 2. **Load Map:** Click **Load Map Image** and select a floor plan of your space (PNG, JPG, BMP).
+![MapLoaded](Photos/MapLoaded.png)
 3. **Calibration:**
    - Click **Calibrate Map**.
    - Click on two points on the map where you know the real-world distance between them.
    - Enter the distance in meters when prompted. This scales the physics engine.
+![Calibrate](Photos/Calibrate.png)
 4. **Measure:**
    - Adjust your **Measurement Radius (m)**.
    - Click **Start Measuring**.
    - Walk to a location in the real world, and click that exact location on the digital map.
    - *The app will take 3 rapid scans to average the environment, grab the exact frequencies of all nearby APs, and plot a red dot on your map.*
+![Measures](Photos/Measures.png)
 5. **Generate Heatmap:**
    - Select the target network (SSID) from the dropdown.
    - Click **Generate Heatmap**. A new window will pop up with your colored Wi-Fi footprint.
+![HeatMap](Photos/HeatMap.png)
+![HeatMap](Photos/Heatmap_WiFi2.png)
 6. **Save/Export:** Export the final image as a PNG, or click **Save Session** on the sidebar to save your raw data and map into a single file for later use.
 
 ## How it Works
