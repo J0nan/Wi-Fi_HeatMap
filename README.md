@@ -292,7 +292,7 @@ def dbm_to_percent(dbm_val):
 
 Mathematically:
 
-$$\text{percent} = \text{clamp}\left(\operatorname{round}\left(\frac{\text{dBm} + 100}{60} \times 100\right),\, 0,\, 100\right)$$
+$$\text{percent} = \text{clamp}\left(\text{round}\left(\frac{\text{dBm} + 100}{60} \times 100\right), 0, 100\right)$$
 
 The 60 in the denominator comes from the dynamic range: `-40 - (-100) = 60 dB`.
 
